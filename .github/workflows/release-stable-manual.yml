@@ -288,7 +288,7 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
           gh release create "$TAG" release-assets/* \
@@ -299,6 +299,7 @@ jobs:
 
   crates-io:
     name: Publish to crates.io
+    if: github.repository == 'zeroclaw-labs/zeroclaw'
     needs: [validate, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -356,6 +357,7 @@ jobs:
 
   redeploy-website:
     name: Trigger Website Redeploy
+    if: github.repository == 'zeroclaw-labs/zeroclaw'
     needs: [publish]
     runs-on: ubuntu-latest
     steps:
@@ -443,8 +445,8 @@ jobs:
   # ── Post-publish: package manager auto-sync ─────────────────────────
   scoop:
     name: Update Scoop Manifest
+    if: github.repository == 'zeroclaw-labs/zeroclaw' && !cancelled() && needs.publish.result == 'success'
     needs: [validate, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     uses: ./.github/workflows/pub-scoop.yml
     with:
       release_tag: ${{ needs.validate.outputs.tag }}
@@ -453,8 +455,8 @@ jobs:
 
   aur:
     name: Update AUR Package
+    if: github.repository == 'zeroclaw-labs/zeroclaw' && !cancelled() && needs.publish.result == 'success'
     needs: [validate, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     uses: ./.github/workflows/pub-aur.yml
     with:
       release_tag: ${{ needs.validate.outputs.tag }}
@@ -465,8 +467,8 @@ jobs:
   # Docker push can be slow; don't let it block the tweet.
   tweet:
     name: Tweet Release
+    if: github.repository == 'zeroclaw-labs/zeroclaw' && !cancelled() && needs.publish.result == 'success'
     needs: [validate, publish, redeploy-website]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     uses: ./.github/workflows/tweet-release.yml
     with:
       release_tag: ${{ needs.validate.outputs.tag }}

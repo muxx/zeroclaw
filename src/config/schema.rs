@@ -265,6 +265,10 @@ pub struct Config {
     #[serde(default)]
     pub web_fetch: WebFetchConfig,
 
+    /// Link enricher configuration (`[link_enricher]`).
+    #[serde(default)]
+    pub link_enricher: LinkEnricherConfig,
+
     /// Text browser tool configuration (`[text_browser]`).
     #[serde(default)]
     pub text_browser: TextBrowserConfig,
@@ -1274,6 +1278,10 @@ pub struct AgentConfig {
     /// Useful for small-context models (e.g. glm-4.5-air ~8K tokens → set to 8000).
     #[serde(default = "default_max_system_prompt_chars")]
     pub max_system_prompt_chars: usize,
+    /// Thinking/reasoning level control. Configures how deeply the model reasons
+    /// per message. Users can override per-message with `/think:<level>` directives.
+    #[serde(default)]
+    pub thinking: crate::agent::thinking::ThinkingConfig,
 }
 
 fn default_agent_max_tool_iterations() -> usize {
@@ -1308,6 +1316,7 @@ impl Default for AgentConfig {
             tool_call_dedup_exempt: Vec::new(),
             tool_filter_groups: Vec::new(),
             max_system_prompt_chars: default_max_system_prompt_chars(),
+            thinking: crate::agent::thinking::ThinkingConfig::default(),
         }
     }
 }
@@ -2147,8 +2156,8 @@ fn default_browser_webdriver_url() -> String {
 impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            allowed_domains: Vec::new(),
+            enabled: true,
+            allowed_domains: vec!["*".into()],
             session_name: None,
             backend: default_browser_backend(),
             native_headless: default_true(),
@@ -2163,7 +2172,9 @@ impl Default for BrowserConfig {
 
 /// HTTP request tool configuration (`[http_request]` section).
 ///
-/// Deny-by-default: if `allowed_domains` is empty, all HTTP requests are rejected.
+/// Domain filtering: `allowed_domains` controls which hosts are reachable (use `["*"]`
+/// for all public hosts, which is the default). If `allowed_domains` is empty, all
+/// requests are rejected.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HttpRequestConfig {
     /// Enable `http_request` tool for API interactions
@@ -2187,8 +2198,8 @@ pub struct HttpRequestConfig {
 impl Default for HttpRequestConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            allowed_domains: vec![],
+            enabled: true,
+            allowed_domains: vec!["*".into()],
             max_response_size: default_http_max_response_size(),
             timeout_secs: default_http_timeout_secs(),
             allow_private_hosts: false,
@@ -2246,11 +2257,50 @@ fn default_web_fetch_allowed_domains() -> Vec<String> {
 impl Default for WebFetchConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             allowed_domains: vec!["*".into()],
             blocked_domains: vec![],
             max_response_size: default_web_fetch_max_response_size(),
             timeout_secs: default_web_fetch_timeout_secs(),
+        }
+    }
+}
+
+// ── Link enricher ─────────────────────────────────────────────────
+
+/// Automatic link understanding for inbound channel messages (`[link_enricher]`).
+///
+/// When enabled, URLs in incoming messages are automatically fetched and
+/// summarised. The summary is prepended to the message before the agent
+/// processes it, giving the LLM context about linked pages without an
+/// explicit tool call.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LinkEnricherConfig {
+    /// Enable the link enricher pipeline stage (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum number of links to fetch per message (default: 3)
+    #[serde(default = "default_link_enricher_max_links")]
+    pub max_links: usize,
+    /// Per-link fetch timeout in seconds (default: 10)
+    #[serde(default = "default_link_enricher_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_link_enricher_max_links() -> usize {
+    3
+}
+
+fn default_link_enricher_timeout_secs() -> u64 {
+    10
+}
+
+impl Default for LinkEnricherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_links: default_link_enricher_max_links(),
+            timeout_secs: default_link_enricher_timeout_secs(),
         }
     }
 }
@@ -2296,12 +2346,15 @@ pub struct WebSearchConfig {
     /// Enable `web_search_tool` for web searches
     #[serde(default)]
     pub enabled: bool,
-    /// Search provider: "duckduckgo" (free, no API key) or "brave" (requires API key)
+    /// Search provider: "duckduckgo" (free), "brave" (requires API key), or "searxng" (self-hosted)
     #[serde(default = "default_web_search_provider")]
     pub provider: String,
     /// Brave Search API key (required if provider is "brave")
     #[serde(default)]
     pub brave_api_key: Option<String>,
+    /// SearXNG instance URL (required if provider is "searxng"), e.g. "https://searx.example.com"
+    #[serde(default)]
+    pub searxng_instance_url: Option<String>,
     /// Maximum results per search (1-10)
     #[serde(default = "default_web_search_max_results")]
     pub max_results: usize,
@@ -2325,9 +2378,10 @@ fn default_web_search_timeout_secs() -> u64 {
 impl Default for WebSearchConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             provider: default_web_search_provider(),
             brave_api_key: None,
+            searxng_instance_url: None,
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
         }
@@ -4804,6 +4858,92 @@ pub struct CronConfig {
     /// Maximum number of historical cron run records to retain. Default: `50`.
     #[serde(default = "default_max_run_history")]
     pub max_run_history: u32,
+    /// Declarative cron job definitions (`[[cron.jobs]]`).
+    ///
+    /// Jobs declared here are synced into the database at scheduler startup.
+    /// They use `source = "declarative"` to distinguish them from jobs
+    /// created imperatively via CLI or API. Declarative config takes
+    /// precedence on each sync: if the config changes, the DB is updated
+    /// to match. Imperative jobs are never deleted by the sync process.
+    #[serde(default)]
+    pub jobs: Vec<CronJobDecl>,
+}
+
+/// A declarative cron job definition for the `[[cron.jobs]]` config array.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CronJobDecl {
+    /// Stable identifier used for merge semantics across syncs.
+    pub id: String,
+    /// Human-readable name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Job type: `"shell"` (default) or `"agent"`.
+    #[serde(default = "default_job_type_decl")]
+    pub job_type: String,
+    /// Schedule for the job.
+    pub schedule: CronScheduleDecl,
+    /// Shell command to run (required when `job_type = "shell"`).
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Agent prompt (required when `job_type = "agent"`).
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Whether the job is enabled. Default: `true`.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Model override for agent jobs.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Allowlist of tool names for agent jobs.
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Session target: `"isolated"` (default) or `"main"`.
+    #[serde(default)]
+    pub session_target: Option<String>,
+    /// Delivery configuration.
+    #[serde(default)]
+    pub delivery: Option<DeliveryConfigDecl>,
+}
+
+/// Schedule variant for declarative cron jobs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum CronScheduleDecl {
+    /// Classic cron expression.
+    Cron {
+        expr: String,
+        #[serde(default)]
+        tz: Option<String>,
+    },
+    /// Interval in milliseconds.
+    Every { every_ms: u64 },
+    /// One-shot at an RFC 3339 timestamp.
+    At { at: String },
+}
+
+/// Delivery configuration for declarative cron jobs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeliveryConfigDecl {
+    /// Delivery mode: `"none"` or `"announce"`.
+    #[serde(default = "default_delivery_mode")]
+    pub mode: String,
+    /// Channel name (e.g. `"telegram"`, `"discord"`).
+    #[serde(default)]
+    pub channel: Option<String>,
+    /// Target/recipient identifier.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Best-effort delivery. Default: `true`.
+    #[serde(default = "default_true")]
+    pub best_effort: bool,
+}
+
+fn default_job_type_decl() -> String {
+    "shell".to_string()
+}
+
+fn default_delivery_mode() -> String {
+    "none".to_string()
 }
 
 fn default_max_run_history() -> u32 {
@@ -4816,6 +4956,7 @@ impl Default for CronConfig {
             enabled: true,
             catch_up_on_startup: true,
             max_run_history: default_max_run_history(),
+            jobs: Vec::new(),
         }
     }
 }
@@ -7021,6 +7162,7 @@ impl Default for Config {
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
             web_fetch: WebFetchConfig::default(),
+            link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
             web_search: WebSearchConfig::default(),
             project_intel: ProjectIntelConfig::default(),
@@ -8940,6 +9082,16 @@ impl Config {
             }
         }
 
+        // SearXNG instance URL: ZEROCLAW_SEARXNG_INSTANCE_URL or SEARXNG_INSTANCE_URL
+        if let Ok(instance_url) = std::env::var("ZEROCLAW_SEARXNG_INSTANCE_URL")
+            .or_else(|_| std::env::var("SEARXNG_INSTANCE_URL"))
+        {
+            let instance_url = instance_url.trim();
+            if !instance_url.is_empty() {
+                self.web_search.searxng_instance_url = Some(instance_url.to_string());
+            }
+        }
+
         // Web search max results: ZEROCLAW_WEB_SEARCH_MAX_RESULTS or WEB_SEARCH_MAX_RESULTS
         if let Ok(max_results) = std::env::var("ZEROCLAW_WEB_SEARCH_MAX_RESULTS")
             .or_else(|_| std::env::var("WEB_SEARCH_MAX_RESULTS"))
@@ -9627,8 +9779,8 @@ mod tests {
         let cfg = HttpRequestConfig::default();
         assert_eq!(cfg.timeout_secs, 30);
         assert_eq!(cfg.max_response_size, 1_000_000);
-        assert!(!cfg.enabled);
-        assert!(cfg.allowed_domains.is_empty());
+        assert!(cfg.enabled);
+        assert_eq!(cfg.allowed_domains, vec!["*".to_string()]);
     }
 
     #[test]
@@ -9817,6 +9969,7 @@ recipient = "42"
             enabled: false,
             catch_up_on_startup: false,
             max_run_history: 100,
+            jobs: Vec::new(),
         };
         let json = serde_json::to_string(&c).unwrap();
         let parsed: CronConfig = serde_json::from_str(&json).unwrap();
@@ -9991,6 +10144,7 @@ default_temperature = 0.7
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
             web_fetch: WebFetchConfig::default(),
+            link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
             web_search: WebSearchConfig::default(),
             project_intel: ProjectIntelConfig::default(),
@@ -10507,6 +10661,7 @@ default_temperature = 0.7
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
             web_fetch: WebFetchConfig::default(),
+            link_enricher: LinkEnricherConfig::default(),
             text_browser: TextBrowserConfig::default(),
             web_search: WebSearchConfig::default(),
             project_intel: ProjectIntelConfig::default(),
@@ -11531,15 +11686,15 @@ default_temperature = 0.7
         assert!(!c.composio.enabled);
         assert!(c.composio.api_key.is_none());
         assert!(c.secrets.encrypt);
-        assert!(!c.browser.enabled);
-        assert!(c.browser.allowed_domains.is_empty());
+        assert!(c.browser.enabled);
+        assert_eq!(c.browser.allowed_domains, vec!["*".to_string()]);
     }
 
     #[test]
-    async fn browser_config_default_disabled() {
+    async fn browser_config_default_enabled() {
         let b = BrowserConfig::default();
-        assert!(!b.enabled);
-        assert!(b.allowed_domains.is_empty());
+        assert!(b.enabled);
+        assert_eq!(b.allowed_domains, vec!["*".to_string()]);
         assert_eq!(b.backend, "agent_browser");
         assert!(b.native_headless);
         assert_eq!(b.native_webdriver_url, "http://127.0.0.1:9515");
@@ -11604,8 +11759,8 @@ config_path = "/tmp/config.toml"
 default_temperature = 0.7
 "#;
         let parsed = parse_test_config(minimal);
-        assert!(!parsed.browser.enabled);
-        assert!(parsed.browser.allowed_domains.is_empty());
+        assert!(parsed.browser.enabled);
+        assert_eq!(parsed.browser.allowed_domains, vec!["*".to_string()]);
     }
 
     // ── Environment variable overrides (Docker support) ─────────

@@ -26,6 +26,7 @@ pub mod imessage;
 pub mod irc;
 #[cfg(feature = "channel-lark")]
 pub mod lark;
+pub mod link_enricher;
 pub mod linq;
 #[cfg(feature = "channel-matrix")]
 pub mod matrix;
@@ -2066,6 +2067,25 @@ async fn process_channel_message(
         msg
     };
 
+    // ── Link enricher: prepend URL summaries before agent sees the message ──
+    let le_config = &ctx.prompt_config.link_enricher;
+    if le_config.enabled {
+        let enricher_cfg = link_enricher::LinkEnricherConfig {
+            enabled: le_config.enabled,
+            max_links: le_config.max_links,
+            timeout_secs: le_config.timeout_secs,
+        };
+        let enriched = link_enricher::enrich_message(&msg.content, &enricher_cfg).await;
+        if enriched != msg.content {
+            tracing::info!(
+                channel = %msg.channel,
+                sender = %msg.sender,
+                "Link enricher: prepended URL summaries to message"
+            );
+            msg.content = enriched;
+        }
+    }
+
     let target_channel = ctx
         .channels_by_name
         .get(&msg.channel)
@@ -3670,13 +3690,16 @@ fn build_channel_by_id(config: &Config, channel_id: &str) -> Result<Arc<dyn Chan
                 .discord
                 .as_ref()
                 .context("Discord channel is not configured")?;
-            Ok(Arc::new(DiscordChannel::new(
-                dc.bot_token.clone(),
-                dc.guild_id.clone(),
-                dc.allowed_users.clone(),
-                dc.listen_to_bots,
-                dc.mention_only,
-            )))
+            Ok(Arc::new(
+                DiscordChannel::new(
+                    dc.bot_token.clone(),
+                    dc.guild_id.clone(),
+                    dc.allowed_users.clone(),
+                    dc.listen_to_bots,
+                    dc.mention_only,
+                )
+                .with_transcription(config.transcription.clone()),
+            ))
         }
         "slack" => {
             let sl = config
@@ -3692,7 +3715,8 @@ fn build_channel_by_id(config: &Config, channel_id: &str) -> Result<Arc<dyn Chan
                     Vec::new(),
                     sl.allowed_users.clone(),
                 )
-                .with_workspace_dir(config.workspace_dir.clone()),
+                .with_workspace_dir(config.workspace_dir.clone())
+                .with_transcription(config.transcription.clone()),
             ))
         }
         other => anyhow::bail!("Unknown channel '{other}'. Supported: telegram, discord, slack"),
@@ -3778,7 +3802,8 @@ fn collect_configured_channels(
                     dc.listen_to_bots,
                     dc.mention_only,
                 )
-                .with_proxy_url(dc.proxy_url.clone()),
+                .with_proxy_url(dc.proxy_url.clone())
+                .with_transcription(config.transcription.clone()),
             ),
         });
     }
@@ -3822,7 +3847,8 @@ fn collect_configured_channels(
                 .with_thread_replies(sl.thread_replies.unwrap_or(true))
                 .with_group_reply_policy(sl.mention_only, Vec::new())
                 .with_workspace_dir(config.workspace_dir.clone())
-                .with_proxy_url(sl.proxy_url.clone()),
+                .with_proxy_url(sl.proxy_url.clone())
+                .with_transcription(config.transcription.clone()),
             ),
         });
     }
@@ -7700,9 +7726,9 @@ BTC is currently around $65,000 based on latest tool output."#
         assert!(prompt.contains("<instructions>"));
         assert!(prompt
             .contains("<instruction>Always run cargo test before final response.</instruction>"));
-        assert!(prompt.contains("<tools>"));
-        assert!(prompt.contains("<name>lint</name>"));
-        assert!(prompt.contains("<kind>shell</kind>"));
+        // Registered tools (shell kind) appear under <callable_tools> with prefixed names
+        assert!(prompt.contains("<callable_tools"));
+        assert!(prompt.contains("<name>code-review.lint</name>"));
         assert!(!prompt.contains("loaded on demand"));
     }
 
@@ -7745,10 +7771,10 @@ BTC is currently around $65,000 based on latest tool output."#
         assert!(!prompt.contains("<instructions>"));
         assert!(!prompt
             .contains("<instruction>Always run cargo test before final response.</instruction>"));
-        // Compact mode should still include tools so the LLM knows about them
-        assert!(prompt.contains("<tools>"));
-        assert!(prompt.contains("<name>lint</name>"));
-        assert!(prompt.contains("<kind>shell</kind>"));
+        // Compact mode should still include tools so the LLM knows about them.
+        // Registered tools (shell kind) appear under <callable_tools> with prefixed names.
+        assert!(prompt.contains("<callable_tools"));
+        assert!(prompt.contains("<name>code-review.lint</name>"));
     }
 
     #[test]

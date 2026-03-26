@@ -376,6 +376,7 @@ methods = ["list", "get", "create", "update"]
 | `max_cost_per_day_cents` | `500` | 每个策略的支出防护 |
 | `require_approval_for_medium_risk` | `true` | 中等风险命令的审批门控 |
 | `block_high_risk_commands` | `true` | 高风险命令的硬阻止 |
+| `enforce_command_preflight` | `true` | 在 shell 风险评估前调用 `SecurityPolicy::is_command_allowed()` |
 | `auto_approve` | `[]` | 始终自动批准的工具操作 |
 | `always_ask` | `[]` | 始终需要批准的工具操作 |
 
@@ -387,6 +388,7 @@ methods = ["list", "get", "create", "update"]
 - `allowed_commands` 条目可以是命令名称（例如 `"git"`）、显式可执行路径（例如 `"/usr/bin/antigravity"`）或 `"*"` 以允许任何命令名称/路径（风险门控仍然适用）。
 - Shell 分隔符/运算符解析是引号感知的。引用参数内的 `;` 等字符被视为文字，而不是命令分隔符。
 - 未引用的 Shell 链接/运算符仍由策略检查强制执行（`;`、`|`、`&&`、`||`、后台链接和重定向）。
+- `enforce_command_preflight = false` 会跳过完整的 `is_command_allowed()` 预检。这会同时禁用该方法中的 shell allowlist 检查和 shell 语法护栏；风险门控、审批门控、禁止路径检查和动作预算仍然生效。
 
 ```toml
 [autonomy]

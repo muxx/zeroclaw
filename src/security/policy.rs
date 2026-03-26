@@ -79,6 +79,7 @@ impl Clone for ActionTracker {
 
 /// Security policy enforced on all tool executions
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SecurityPolicy {
     pub autonomy: AutonomyLevel,
     pub workspace_dir: PathBuf,
@@ -90,6 +91,7 @@ pub struct SecurityPolicy {
     pub max_cost_per_day_cents: u32,
     pub require_approval_for_medium_risk: bool,
     pub block_high_risk_commands: bool,
+    pub enforce_command_preflight: bool,
     pub shell_env_passthrough: Vec<String>,
     pub tracker: ActionTracker,
 }
@@ -222,6 +224,7 @@ impl Default for SecurityPolicy {
             max_cost_per_day_cents: 500,
             require_approval_for_medium_risk: true,
             block_high_risk_commands: true,
+            enforce_command_preflight: true,
             shell_env_passthrough: vec![],
             tracker: ActionTracker::new(),
         }
@@ -848,7 +851,7 @@ impl SecurityPolicy {
         command: &str,
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
-        if !self.is_command_allowed(command) {
+        if self.enforce_command_preflight && !self.is_command_allowed(command) {
             return Err(format!("Command not allowed by security policy: {command}"));
         }
 
@@ -1383,6 +1386,7 @@ impl SecurityPolicy {
             max_cost_per_day_cents: autonomy_config.max_cost_per_day_cents,
             require_approval_for_medium_risk: autonomy_config.require_approval_for_medium_risk,
             block_high_risk_commands: autonomy_config.block_high_risk_commands,
+            enforce_command_preflight: autonomy_config.enforce_command_preflight,
             shell_env_passthrough: autonomy_config.shell_env_passthrough.clone(),
             tracker: ActionTracker::new(),
         }
@@ -1975,8 +1979,47 @@ mod tests {
         assert_eq!(policy.max_cost_per_day_cents, 1000);
         assert!(!policy.require_approval_for_medium_risk);
         assert!(!policy.block_high_risk_commands);
+        assert!(policy.enforce_command_preflight);
         assert_eq!(policy.shell_env_passthrough, vec!["DATABASE_URL"]);
         assert_eq!(policy.workspace_dir, PathBuf::from("/tmp/test-workspace"));
+    }
+
+    #[test]
+    fn validate_command_skips_preflight_when_disabled() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            enforce_command_preflight: false,
+            ..SecurityPolicy::default()
+        };
+
+        let result = p.validate_command_execution("which glab && glab auth status 2>&1", false);
+        assert_eq!(result.unwrap(), CommandRiskLevel::Low);
+    }
+
+    #[test]
+    fn validate_command_still_enforces_medium_risk_when_preflight_disabled() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            enforce_command_preflight: false,
+            ..SecurityPolicy::default()
+        };
+
+        let denied = p.validate_command_execution("touch test.txt", false);
+        assert!(denied.is_err());
+        assert!(denied.unwrap_err().contains("requires explicit approval"));
+    }
+
+    #[test]
+    fn validate_command_still_blocks_high_risk_when_preflight_disabled() {
+        let p = SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            enforce_command_preflight: false,
+            ..SecurityPolicy::default()
+        };
+
+        let denied = p.validate_command_execution("rm -rf /tmp/test", true);
+        assert!(denied.is_err());
+        assert!(denied.unwrap_err().contains("high-risk"));
     }
 
     #[test]

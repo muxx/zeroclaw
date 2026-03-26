@@ -4614,6 +4614,7 @@ impl Default for WebhookAuditConfig {
 /// risk approval gates, and per-policy budgets.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AutonomyConfig {
     /// Autonomy level: `read_only`, `supervised` (default), or `full`.
     pub level: AutonomyLevel,
@@ -4636,6 +4637,13 @@ pub struct AutonomyConfig {
     /// Block high-risk shell commands even if allowlisted.
     #[serde(default = "default_true")]
     pub block_high_risk_commands: bool,
+
+    /// Run shell command preflight validation before risk evaluation.
+    ///
+    /// When enabled, ZeroClaw calls `SecurityPolicy::is_command_allowed()`
+    /// before applying risk and approval gates.
+    #[serde(default = "default_true")]
+    pub enforce_command_preflight: bool,
 
     /// Additional environment variables allowed for shell tool subprocesses.
     ///
@@ -4754,6 +4762,7 @@ impl Default for AutonomyConfig {
             max_cost_per_day_cents: 500,
             require_approval_for_medium_risk: true,
             block_high_risk_commands: true,
+            enforce_command_preflight: true,
             shell_env_passthrough: vec![],
             auto_approve: default_auto_approve(),
             always_ask: default_always_ask(),
@@ -10330,6 +10339,7 @@ mod tests {
         assert_eq!(a.max_cost_per_day_cents, 500);
         assert!(a.require_approval_for_medium_risk);
         assert!(a.block_high_risk_commands);
+        assert!(a.enforce_command_preflight);
         assert!(a.shell_env_passthrough.is_empty());
     }
 
@@ -10468,6 +10478,7 @@ default_temperature = 0.7
                 max_cost_per_day_cents: 1000,
                 require_approval_for_medium_risk: false,
                 block_high_risk_commands: true,
+                enforce_command_preflight: true,
                 shell_env_passthrough: vec!["DATABASE_URL".into()],
                 auto_approve: vec!["file_read".into()],
                 always_ask: vec![],

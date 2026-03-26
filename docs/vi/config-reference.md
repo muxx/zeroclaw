@@ -312,6 +312,7 @@ methods = ["list", "get", "create", "update"]
 | `max_cost_per_day_cents` | `1000` | Giới hạn chi tiêu mỗi ngày (cent) |
 | `require_approval_for_medium_risk` | `true` | Yêu cầu phê duyệt cho lệnh rủi ro trung bình |
 | `block_high_risk_commands` | `true` | Chặn cứng lệnh rủi ro cao |
+| `enforce_command_preflight` | `true` | Gọi `SecurityPolicy::is_command_allowed()` trước khi đánh giá rủi ro shell |
 | `auto_approve` | `[]` | Thao tác tool luôn được tự động phê duyệt |
 | `always_ask` | `[]` | Thao tác tool luôn yêu cầu phê duyệt |
 
@@ -320,6 +321,7 @@ Lưu ý:
 - `level = "full"` bỏ qua phê duyệt rủi ro trung bình cho shell execution, nhưng vẫn áp dụng guardrail đã cấu hình.
 - Phân tích toán tử/dấu phân cách shell nhận biết dấu ngoặc kép. Ký tự như `;` trong đối số được trích dẫn được xử lý là ký tự, không phải dấu phân cách lệnh.
 - Toán tử chuỗi shell không trích dẫn vẫn được kiểm tra bởi policy (`;`, `|`, `&&`, `||`, chạy nền và chuyển hướng).
+- `enforce_command_preflight = false` sẽ bỏ qua toàn bộ bước tiền kiểm `is_command_allowed()`. Việc này đồng thời tắt kiểm tra allowlist shell và các guardrail cú pháp shell nằm trong phương thức đó; các cổng rủi ro, cổng phê duyệt, kiểm tra đường dẫn bị cấm và ngân sách hành động vẫn được áp dụng.
 
 ## `[memory]`
 

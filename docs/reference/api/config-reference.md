@@ -473,6 +473,7 @@ and must not end with `/`.
 | `max_cost_per_day_cents` | `500` | per-policy spend guardrail |
 | `require_approval_for_medium_risk` | `true` | approval gate for medium-risk commands |
 | `block_high_risk_commands` | `true` | hard block for high-risk commands |
+| `enforce_command_preflight` | `true` | call `SecurityPolicy::is_command_allowed()` before shell risk evaluation |
 | `auto_approve` | `[]` | tool operations always auto-approved |
 | `always_ask` | `[]` | tool operations that always require approval |
 
@@ -484,6 +485,7 @@ Notes:
 - `allowed_commands` entries can be command names (for example, `"git"`), explicit executable paths (for example, `"/usr/bin/antigravity"`), or `"*"` to allow any command name/path (risk gates still apply).
 - Shell separator/operator parsing is quote-aware. Characters like `;` inside quoted arguments are treated as literals, not command separators.
 - Unquoted shell chaining/operators are still enforced by policy checks (`;`, `|`, `&&`, `||`, background chaining, and redirects).
+- `enforce_command_preflight = false` skips the full `is_command_allowed()` preflight. That disables both the shell allowlist check and the shell-syntax guardrails implemented in that method; risk gates, approval gates, forbidden-path checks, and action budgets still apply.
 
 ```toml
 [autonomy]

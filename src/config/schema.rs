@@ -1231,6 +1231,7 @@ pub struct ToolFilterGroup {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OpenAiSttConfig {
     /// OpenAI API key for Whisper transcription.
+    /// Falls back to `TRANSCRIPTION_API_KEY`, then `OPENAI_API_KEY`.
     #[serde(default)]
     pub api_key: Option<String>,
     /// Whisper model name (default: "whisper-1").
@@ -5194,7 +5195,6 @@ impl Default for WebhookAuditConfig {
 ///
 /// Controls what the agent is allowed to do: shell commands, filesystem access,
 /// risk approval gates, and per-policy budgets.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 #[allow(clippy::struct_excessive_bools)]

@@ -4919,6 +4919,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         system_prompt.push_str(&build_tool_instructions(
             tools_registry.as_ref(),
             Some(&i18n_descs),
+            excluded,
         ));
     }
 
@@ -8083,7 +8084,7 @@ BTC is currently around $65,000 based on latest tool output."#
             "build_system_prompt should not emit protocol block directly"
         );
 
-        prompt.push_str(&build_tool_instructions(&[], None));
+        prompt.push_str(&build_tool_instructions(&[], None, &[]));
 
         assert_eq!(
             prompt.matches("## Tool Use Protocol").count(),

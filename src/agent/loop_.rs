@@ -3792,6 +3792,7 @@ pub(crate) async fn run_tool_call_loop(
 pub(crate) fn build_tool_instructions(
     tools_registry: &[Box<dyn Tool>],
     tool_descriptions: Option<&ToolDescriptions>,
+    excluded_tools: &[String],
 ) -> String {
     let mut instructions = String::new();
     instructions.push_str("\n## Tool Use Protocol\n\n");
@@ -3807,7 +3808,10 @@ pub(crate) fn build_tool_instructions(
         .push_str("Continue reasoning with the results until you can give a final answer.\n\n");
     instructions.push_str("### Available Tools\n\n");
 
-    for tool in tools_registry {
+    for tool in tools_registry
+        .iter()
+        .filter(|tool| !excluded_tools.iter().any(|ex| ex == tool.name()))
+    {
         let desc = tool_descriptions
             .and_then(|td| td.get(tool.name()))
             .unwrap_or_else(|| tool.description());
@@ -4205,7 +4209,11 @@ pub async fn run(
 
     // Append structured tool-use instructions with schemas (only for non-native providers)
     if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry, Some(&i18n_descs)));
+        system_prompt.push_str(&build_tool_instructions(
+            &tools_registry,
+            Some(&i18n_descs),
+            &[],
+        ));
     }
 
     // Append deferred MCP tool names so the LLM knows what is available
@@ -4988,12 +4996,15 @@ pub async fn process_message(
 
     // Filter out tools excluded for non-CLI channels (gateway counts as non-CLI).
     // Skip when autonomy is `Full` — full-autonomy agents keep all tools.
-    if config.autonomy.level != AutonomyLevel::Full {
-        let excluded = &config.autonomy.non_cli_excluded_tools;
+    let excluded_tools = if config.autonomy.level == AutonomyLevel::Full {
+        Vec::new()
+    } else {
+        let excluded = config.autonomy.non_cli_excluded_tools.clone();
         if !excluded.is_empty() {
             tool_descs.retain(|(name, _)| !excluded.iter().any(|ex| ex == name));
         }
-    }
+        excluded
+    };
 
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
@@ -5015,7 +5026,11 @@ pub async fn process_message(
         config.agent.max_system_prompt_chars,
     );
     if !native_tools {
-        system_prompt.push_str(&build_tool_instructions(&tools_registry, Some(&i18n_descs)));
+        system_prompt.push_str(&build_tool_instructions(
+            &tools_registry,
+            Some(&i18n_descs),
+            &excluded_tools,
+        ));
     }
     if !deferred_section.is_empty() {
         system_prompt.push('\n');
@@ -7936,13 +7951,28 @@ Tail"#;
             std::path::Path::new("/tmp"),
         ));
         let tools = tools::default_tools(security);
-        let instructions = build_tool_instructions(&tools, None);
+        let instructions = build_tool_instructions(&tools, None, &[]);
 
         assert!(instructions.contains("## Tool Use Protocol"));
         assert!(instructions.contains("<tool_call>"));
         assert!(instructions.contains("shell"));
         assert!(instructions.contains("file_read"));
         assert!(instructions.contains("file_write"));
+    }
+
+    #[test]
+    fn build_tool_instructions_excludes_filtered_tools() {
+        use crate::security::SecurityPolicy;
+        let security = Arc::new(SecurityPolicy::from_config(
+            &crate::config::AutonomyConfig::default(),
+            std::path::Path::new("/tmp"),
+        ));
+        let tools = tools::default_tools(security);
+        let excluded = vec!["weather".to_string()];
+        let instructions = build_tool_instructions(&tools, None, &excluded);
+
+        assert!(instructions.contains("shell"));
+        assert!(!instructions.contains("**weather**"));
     }
 
     #[test]

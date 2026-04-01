@@ -36,6 +36,7 @@ pub mod cron_remove;
 pub mod cron_run;
 pub mod cron_runs;
 pub mod cron_update;
+pub mod current_datetime;
 pub mod data_management;
 pub mod delegate;
 pub mod discord_search;
@@ -133,6 +134,7 @@ pub use cron_remove::CronRemoveTool;
 pub use cron_run::CronRunTool;
 pub use cron_runs::CronRunsTool;
 pub use cron_update::CronUpdateTool;
+pub use current_datetime::CurrentDateTimeTool;
 pub use data_management::DataManagementTool;
 pub use delegate::DelegateTool;
 // Re-exported for downstream consumers of background delegation results.
@@ -291,6 +293,7 @@ pub fn default_tools_with_runtime(
     runtime: Arc<dyn RuntimeAdapter>,
 ) -> Vec<Box<dyn Tool>> {
     vec![
+        Box::new(CurrentDateTimeTool::new()),
         Box::new(ShellTool::new(security.clone(), runtime)),
         Box::new(FileReadTool::new(security.clone())),
         Box::new(FileWriteTool::new(security.clone())),
@@ -405,6 +408,7 @@ pub fn all_tools_with_runtime(
     let has_shell_access = runtime.has_shell_access();
     let sandbox = create_sandbox(&root_config.security);
     let mut tool_arcs: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(CurrentDateTimeTool::new()),
         Arc::new(
             ShellTool::new_with_sandbox(security.clone(), runtime, sandbox)
                 .with_timeout_secs(root_config.shell_tool.timeout_secs),
@@ -1073,7 +1077,7 @@ mod tests {
     fn default_tools_has_expected_count() {
         let security = Arc::new(SecurityPolicy::default());
         let tools = default_tools(security);
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
     }
 
     #[test]
@@ -1167,6 +1171,7 @@ mod tests {
         let security = Arc::new(SecurityPolicy::default());
         let tools = default_tools(security);
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
+        assert!(names.contains(&"current_datetime"));
         assert!(names.contains(&"shell"));
         assert!(names.contains(&"file_read"));
         assert!(names.contains(&"file_write"));

@@ -985,7 +985,7 @@ impl DelegateTool {
     }
 
     /// Build an enriched system prompt for a sub-agent by composing structured
-    /// operational sections (tools, skills, workspace, datetime, shell policy)
+    /// operational sections (tools, skills, workspace, shell policy)
     /// with the operator-configured `system_prompt` string.
     fn build_enriched_system_prompt(
         &self,
@@ -1034,8 +1034,7 @@ impl DelegateTool {
             .add_section(Box::new(crate::agent::prompt::ToolsSection))
             .add_section(Box::new(crate::agent::prompt::SafetySection))
             .add_section(Box::new(crate::agent::prompt::SkillsSection))
-            .add_section(Box::new(crate::agent::prompt::WorkspaceSection))
-            .add_section(Box::new(crate::agent::prompt::DateTimeSection));
+            .add_section(Box::new(crate::agent::prompt::WorkspaceSection));
 
         let mut enriched = builder.build(&ctx).unwrap_or_default();
 
@@ -1104,7 +1103,7 @@ impl DelegateTool {
             });
         }
 
-        // Build enriched system prompt with tools, skills, workspace, datetime context.
+        // Build enriched system prompt with tools, skills, workspace context.
         let enriched_system_prompt =
             self.build_enriched_system_prompt(agent_config, &sub_tools, &self.workspace_dir);
 
@@ -1954,7 +1953,7 @@ mod tests {
     }
 
     #[test]
-    fn enriched_prompt_includes_tools_workspace_datetime() {
+    fn enriched_prompt_includes_tools_and_workspace() {
         let config = DelegateAgentConfig {
             provider: "openrouter".to_string(),
             model: "test-model".to_string(),
@@ -1993,10 +1992,6 @@ mod tests {
         assert!(
             prompt.contains(&workspace.display().to_string()),
             "should contain workspace path"
-        );
-        assert!(
-            prompt.contains("## CRITICAL CONTEXT: CURRENT DATE & TIME"),
-            "should contain datetime section"
         );
         assert!(
             prompt.contains("You are a code reviewer."),

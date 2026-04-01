@@ -13,6 +13,7 @@ pub struct PromptContext<'a> {
     pub workspace_dir: &'a Path,
     pub model_name: &'a str,
     pub tools: &'a [Box<dyn Tool>],
+    pub native_tools: bool,
     pub skills: &'a [Skill],
     pub skills_prompt_mode: crate::config::SkillsPromptInjectionMode,
     pub identity_config: Option<&'a IdentityConfig>,
@@ -142,6 +143,10 @@ impl PromptSection for ToolsSection {
     }
 
     fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        if ctx.native_tools {
+            return Ok(String::new());
+        }
+
         let mut out = String::from("## Tools\n\n");
         for tool in ctx.tools {
             let desc = ctx
@@ -325,6 +330,7 @@ mod tests {
             workspace_dir: &workspace,
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: Some(&identity_config),
@@ -356,6 +362,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -368,6 +375,28 @@ mod tests {
         assert!(prompt.contains("## Tools"));
         assert!(prompt.contains("test_tool"));
         assert!(prompt.contains("instr"));
+    }
+
+    #[test]
+    fn prompt_builder_omits_tools_section_for_native_tools() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            native_tools: true,
+            skills: &[],
+            skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "instr",
+            tool_descriptions: None,
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+        let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
+        assert!(!prompt.contains("## Tools"));
+        assert!(!prompt.contains("test_tool"));
+        assert!(!prompt.contains("instr"));
     }
 
     #[test]
@@ -394,6 +423,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &skills,
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -436,6 +466,7 @@ mod tests {
             workspace_dir: Path::new("/tmp/workspace"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &skills,
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Compact,
             identity_config: None,
@@ -480,6 +511,7 @@ mod tests {
             workspace_dir: Path::new("/tmp/workspace"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &skills,
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -514,6 +546,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -549,6 +582,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -576,6 +610,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -611,6 +646,7 @@ mod tests {
             workspace_dir: Path::new("/tmp"),
             model_name: "test-model",
             tools: &tools,
+            native_tools: false,
             skills: &[],
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,

@@ -574,6 +574,7 @@ impl Agent {
             workspace_dir: &self.workspace_dir,
             model_name: &self.model_name,
             tools: &self.tools,
+            native_tools: self.provider.supports_native_tools(),
             skills: &self.skills,
             skills_prompt_mode: self.skills_prompt_mode,
             identity_config: Some(&self.identity_config),

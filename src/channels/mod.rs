@@ -3484,7 +3484,7 @@ pub fn build_system_prompt_with_mode_and_autonomy(
     );
 
     // ── 1. Tooling ──────────────────────────────────────────────
-    if !tools.is_empty() {
+    if !native_tools && !tools.is_empty() {
         prompt.push_str("## Tools\n\n");
         if compact_context {
             // Compact mode: tool names only, no descriptions/schemas
@@ -8025,6 +8025,30 @@ BTC is currently around $65,000 based on latest tool output."#
             "missing Project Context"
         );
         assert!(prompt.contains("## Runtime"), "missing Runtime section");
+    }
+
+    #[test]
+    fn native_tools_prompt_omits_tools_section() {
+        let ws = make_workspace();
+        let tools = vec![("shell", "Run commands"), ("file_read", "Read files")];
+        let prompt = build_system_prompt_with_mode(
+            ws.path(),
+            "test-model",
+            &tools,
+            &[],
+            None,
+            None,
+            true,
+            crate::config::SkillsPromptInjectionMode::Full,
+            AutonomyLevel::default(),
+        );
+
+        assert!(
+            !prompt.contains("## Tools"),
+            "native-tools prompt should not duplicate tool listing"
+        );
+        assert!(!prompt.contains("**shell**"));
+        assert!(!prompt.contains("**file_read**"));
     }
 
     #[test]

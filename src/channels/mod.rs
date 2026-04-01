@@ -658,6 +658,17 @@ fn build_channel_system_prompt(
     prompt
 }
 
+fn channel_excluded_tools_for_turn<'a>(
+    channel: &str,
+    non_cli_excluded_tools: &'a [String],
+) -> &'a [String] {
+    if channel == "cli" {
+        &[]
+    } else {
+        non_cli_excluded_tools
+    }
+}
+
 fn normalize_cached_channel_turns(turns: Vec<ChatMessage>) -> Vec<ChatMessage> {
     let mut normalized = Vec::with_capacity(turns.len());
     let mut expecting_user = true;
@@ -2692,13 +2703,10 @@ async fn process_channel_message(
                         Some(cancellation_token.clone()),
                         delta_tx.clone(),
                         ctx.hooks.as_deref(),
-                        if msg.channel == "cli"
-                            || ctx.autonomy_level == AutonomyLevel::Full
-                        {
-                            &[]
-                        } else {
-                            ctx.non_cli_excluded_tools.as_ref()
-                        },
+                        channel_excluded_tools_for_turn(
+                            msg.channel.as_str(),
+                            ctx.non_cli_excluded_tools.as_ref(),
+                        ),
                         ctx.tool_call_dedup_exempt.as_ref(),
                         ctx.activated_tools.as_ref(),
                         Some(model_switch_callback.clone()),
@@ -8413,6 +8421,22 @@ BTC is currently around $65,000 based on latest tool output."#
 
         assert!(prompt.contains("**shell**"));
         assert!(!prompt.contains("**weather**"));
+    }
+
+    #[test]
+    fn cli_turn_has_no_non_cli_excluded_tools() {
+        let excluded = vec!["weather".to_string(), "screenshot".to_string()];
+        let resolved = channel_excluded_tools_for_turn("cli", &excluded);
+
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn non_cli_turn_keeps_excluded_tools_even_for_full_autonomy_paths() {
+        let excluded = vec!["weather".to_string(), "screenshot".to_string()];
+        let resolved = channel_excluded_tools_for_turn("telegram", &excluded);
+
+        assert_eq!(resolved, excluded.as_slice());
     }
 
     #[test]

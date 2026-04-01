@@ -4817,10 +4817,8 @@ pub async fn start_channels(config: Config) -> Result<()> {
 
     // Filter out tools excluded for non-CLI channels so the system prompt
     // does not advertise them for channel-driven runs.
-    // Skip this filter when autonomy is `Full` — full-autonomy agents keep
-    // all tools available regardless of channel.
     let excluded = &config.autonomy.non_cli_excluded_tools;
-    if !excluded.is_empty() && config.autonomy.level != AutonomyLevel::Full {
+    if !excluded.is_empty() {
         tool_descs.retain(|(name, _)| !excluded.iter().any(|ex| ex == name));
     }
 
@@ -8385,6 +8383,36 @@ BTC is currently around $65,000 based on latest tool output."#
             prompt.contains("instead of simulating an approval flow"),
             "read-only prompt should explain restrictions instead of faking approval"
         );
+    }
+
+    #[test]
+    fn full_autonomy_can_still_hide_non_cli_excluded_tools() {
+        let ws = make_workspace();
+        let config = crate::config::AutonomyConfig {
+            level: crate::security::AutonomyLevel::Full,
+            non_cli_excluded_tools: vec!["weather".to_string()],
+            ..crate::config::AutonomyConfig::default()
+        };
+        let mut tools = vec![("shell", "Run commands"), ("weather", "Get forecast")];
+        let excluded = &config.non_cli_excluded_tools;
+        tools.retain(|(name, _)| !excluded.iter().any(|ex| ex == name));
+
+        let prompt = build_system_prompt_with_mode_and_autonomy(
+            ws.path(),
+            "model",
+            &tools,
+            &[],
+            None,
+            None,
+            Some(&config),
+            false,
+            crate::config::SkillsPromptInjectionMode::Full,
+            false,
+            0,
+        );
+
+        assert!(prompt.contains("**shell**"));
+        assert!(!prompt.contains("**weather**"));
     }
 
     #[test]

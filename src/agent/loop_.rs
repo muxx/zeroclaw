@@ -4993,16 +4993,10 @@ pub async fn process_message(
     }
 
     // Filter out tools excluded for non-CLI channels (gateway counts as non-CLI).
-    // Skip when autonomy is `Full` — full-autonomy agents keep all tools.
-    let excluded_tools = if config.autonomy.level == AutonomyLevel::Full {
-        Vec::new()
-    } else {
-        let excluded = config.autonomy.non_cli_excluded_tools.clone();
-        if !excluded.is_empty() {
-            tool_descs.retain(|(name, _)| !excluded.iter().any(|ex| ex == name));
-        }
-        excluded
-    };
+    let excluded_tools = config.autonomy.non_cli_excluded_tools.clone();
+    if !excluded_tools.is_empty() {
+        tool_descs.retain(|(name, _)| !excluded_tools.iter().any(|ex| ex == name));
+    }
 
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)

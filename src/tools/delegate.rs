@@ -455,8 +455,12 @@ impl DelegateTool {
         }
 
         // Build enriched system prompt for non-agentic sub-agent.
-        let enriched_system_prompt =
-            self.build_enriched_system_prompt(agent_config, &[], &self.workspace_dir);
+        let enriched_system_prompt = self.build_enriched_system_prompt(
+            agent_config,
+            &[],
+            &self.workspace_dir,
+            provider.supports_native_tools(),
+        );
         let system_prompt_ref = enriched_system_prompt.as_deref();
 
         // Wrap the provider call in a timeout to prevent indefinite blocking
@@ -992,6 +996,7 @@ impl DelegateTool {
         agent_config: &DelegateAgentConfig,
         sub_tools: &[Box<dyn Tool>],
         workspace_dir: &Path,
+        native_tools: bool,
     ) -> Option<String> {
         // Resolve skills directory: scoped if configured, otherwise workspace default.
         let skills_dir = agent_config
@@ -1021,6 +1026,7 @@ impl DelegateTool {
             workspace_dir,
             model_name: &agent_config.model,
             tools: sub_tools,
+            native_tools,
             skills: &skills,
             skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
             identity_config: None,
@@ -1104,8 +1110,12 @@ impl DelegateTool {
         }
 
         // Build enriched system prompt with tools, skills, workspace context.
-        let enriched_system_prompt =
-            self.build_enriched_system_prompt(agent_config, &sub_tools, &self.workspace_dir);
+        let enriched_system_prompt = self.build_enriched_system_prompt(
+            agent_config,
+            &sub_tools,
+            &self.workspace_dir,
+            provider.supports_native_tools(),
+        );
 
         let mut history = Vec::new();
         if let Some(system_prompt) = enriched_system_prompt.as_ref() {
@@ -1980,7 +1990,7 @@ mod tests {
             .with_workspace_dir(workspace.clone());
 
         let prompt = tool
-            .build_enriched_system_prompt(&config, &tools, &workspace)
+            .build_enriched_system_prompt(&config, &tools, &workspace, false)
             .unwrap();
 
         assert!(prompt.contains("## Tools"), "should contain tools section");
@@ -1997,6 +2007,45 @@ mod tests {
             prompt.contains("You are a code reviewer."),
             "should append operator system_prompt"
         );
+
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn enriched_prompt_omits_tools_for_native_tool_mode() {
+        let config = DelegateAgentConfig {
+            provider: "openrouter".to_string(),
+            model: "test-model".to_string(),
+            system_prompt: Some("You are a code reviewer.".to_string()),
+            api_key: None,
+            temperature: None,
+            max_depth: 3,
+            agentic: true,
+            allowed_tools: vec!["echo_tool".to_string()],
+            max_iterations: 10,
+            timeout_secs: None,
+            agentic_timeout_secs: None,
+            skills_directory: None,
+        };
+
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(EchoTool)];
+        let workspace = std::env::temp_dir().join(format!(
+            "zeroclaw_delegate_native_enrich_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let tool = DelegateTool::new(HashMap::new(), None, test_security())
+            .with_workspace_dir(workspace.clone());
+
+        let prompt = tool
+            .build_enriched_system_prompt(&config, &tools, &workspace, true)
+            .unwrap();
+
+        assert!(!prompt.contains("## Tools"));
+        assert!(!prompt.contains("echo_tool"));
+        assert!(prompt.contains("## Workspace"));
+        assert!(prompt.contains("You are a code reviewer."));
 
         let _ = std::fs::remove_dir_all(workspace);
     }
@@ -2046,7 +2095,7 @@ mod tests {
             .with_workspace_dir(workspace.to_path_buf());
 
         let prompt = tool
-            .build_enriched_system_prompt(&config, &tools, &workspace)
+            .build_enriched_system_prompt(&config, &tools, &workspace, false)
             .unwrap();
 
         assert!(
@@ -2123,7 +2172,7 @@ mod tests {
             .with_workspace_dir(workspace.to_path_buf());
 
         let prompt = tool
-            .build_enriched_system_prompt(&config, &tools, &workspace)
+            .build_enriched_system_prompt(&config, &tools, &workspace, false)
             .unwrap();
 
         assert!(
@@ -2373,7 +2422,7 @@ mod tests {
             .with_workspace_dir(workspace.clone());
 
         let prompt = tool
-            .build_enriched_system_prompt(&config, &tools, &workspace)
+            .build_enriched_system_prompt(&config, &tools, &workspace, false)
             .unwrap();
 
         assert!(
@@ -2419,7 +2468,7 @@ mod tests {
             .with_workspace_dir(workspace.clone());
 
         let prompt = tool
-            .build_enriched_system_prompt(&config, &tools, &workspace)
+            .build_enriched_system_prompt(&config, &tools, &workspace, false)
             .unwrap();
 
         assert!(

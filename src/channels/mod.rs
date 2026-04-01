@@ -212,8 +212,11 @@ const CHANNEL_TYPING_REFRESH_INTERVAL_SECS: u64 = 4;
 const CHANNEL_HEALTH_HEARTBEAT_SECS: u64 = 30;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const MODEL_CACHE_PREVIEW_LIMIT: usize = 10;
+#[cfg(test)]
 const MEMORY_CONTEXT_MAX_ENTRIES: usize = 4;
+#[cfg(test)]
 const MEMORY_CONTEXT_ENTRY_MAX_CHARS: usize = 800;
+#[cfg(test)]
 const MEMORY_CONTEXT_MAX_CHARS: usize = 4_000;
 const CHANNEL_HISTORY_COMPACT_KEEP_MESSAGES: usize = 12;
 const CHANNEL_HISTORY_COMPACT_CONTENT_CHARS: usize = 600;
@@ -1213,6 +1216,7 @@ fn rollback_orphan_user_turn(
     true
 }
 
+#[cfg(test)]
 fn should_skip_memory_context_entry(key: &str, content: &str) -> bool {
     if memory::is_assistant_autosave_key(key) {
         return true;
@@ -1723,6 +1727,7 @@ async fn handle_runtime_command_if_needed(
     true
 }
 
+#[cfg(test)]
 async fn build_memory_context(
     mem: &dyn Memory,
     user_msg: &str,
@@ -2481,63 +2486,14 @@ async fn process_channel_message(
         );
     }
 
-    // ── Dual-scope memory recall ──────────────────────────────────
-    // Always recall before each LLM call (not just first turn).
-    // For group chats: merge sender-scope + group-scope memories.
-    // For DMs: sender-scope only.
-    let is_group_chat =
-        msg.reply_target.contains("@g.us") || msg.reply_target.starts_with("group:");
-
-    let mem_recall_start = Instant::now();
-    let sender_memory_fut = build_memory_context(
-        ctx.memory.as_ref(),
-        &msg.content,
-        ctx.min_relevance_score,
-        Some(&msg.sender),
-    );
-
-    let (sender_memory, group_memory) = if is_group_chat {
-        let group_memory_fut = build_memory_context(
-            ctx.memory.as_ref(),
-            &msg.content,
-            ctx.min_relevance_score,
-            Some(&history_key),
-        );
-        tokio::join!(sender_memory_fut, group_memory_fut)
-    } else {
-        (sender_memory_fut.await, String::new())
-    };
-    #[allow(clippy::cast_possible_truncation)]
-    let mem_recall_ms = mem_recall_start.elapsed().as_millis() as u64;
-    tracing::info!(
-        mem_recall_ms,
-        sender_empty = sender_memory.is_empty(),
-        group_empty = group_memory.is_empty(),
-        "⏱ Memory recall completed"
-    );
-
-    // Merge sender + group memories, avoiding duplicates
-    let memory_context = if group_memory.is_empty() {
-        sender_memory
-    } else if sender_memory.is_empty() {
-        group_memory
-    } else {
-        format!("{sender_memory}\n{group_memory}")
-    };
-
-    // Use refreshed system prompt for new sessions (master's /new support),
-    // and inject memory into system prompt (not user message) so it
-    // doesn't pollute session history and is re-fetched each turn.
+    // Use refreshed system prompt for new sessions (master's /new support).
     let base_system_prompt = if had_prior_history {
         ctx.system_prompt.as_str().to_string()
     } else {
         refreshed_new_session_system_prompt(ctx.as_ref())
     };
-    let mut system_prompt =
+    let system_prompt =
         build_channel_system_prompt(&base_system_prompt, &msg.channel, &msg.reply_target);
-    if !memory_context.is_empty() {
-        let _ = write!(system_prompt, "\n\n{memory_context}");
-    }
     let mut history = vec![ChatMessage::system(system_prompt)];
     history.extend(prior_turns);
     let use_draft_streaming = target_channel
@@ -9111,10 +9067,9 @@ BTC is currently around $65,000 based on latest tool output."#
             .unwrap_or_else(|e| e.into_inner());
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].len(), 2);
-        // Memory context is injected into the system prompt, not the user message.
         assert_eq!(calls[0][0].0, "system");
-        assert!(calls[0][0].1.contains("[Memory context]"));
-        assert!(calls[0][0].1.contains("Age is 45"));
+        assert!(!calls[0][0].1.contains("[Memory context]"));
+        assert!(!calls[0][0].1.contains("Age is 45"));
         assert_eq!(calls[0][1].0, "user");
         assert_eq!(calls[0][1].1, "hello");
 

@@ -4289,11 +4289,10 @@ pub async fn run(
             .map(|r| build_hardware_context(r, &effective_msg, &board_names, rag_limit))
             .unwrap_or_default();
         let context = format!("{mem_context}{hw_context}");
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
         let enriched = if context.is_empty() {
-            format!("[{now}] {effective_msg}")
+            effective_msg.clone()
         } else {
-            format!("{context}[{now}] {effective_msg}")
+            format!("{context}{effective_msg}")
         };
 
         let mut history = vec![
@@ -4562,11 +4561,10 @@ pub async fn run(
                 .map(|r| build_hardware_context(r, &effective_input, &board_names, rag_limit))
                 .unwrap_or_default();
             let context = format!("{mem_context}{hw_context}");
-            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
             let enriched = if context.is_empty() {
-                format!("[{now}] {effective_input}")
+                effective_input.clone()
             } else {
-                format!("{context}[{now}] {effective_input}")
+                format!("{context}{effective_input}")
             };
 
             history.push(ChatMessage::user(&enriched));
@@ -5060,11 +5058,10 @@ pub async fn process_message(
         .map(|r| build_hardware_context(r, effective_msg_ref, &board_names, rag_limit))
         .unwrap_or_default();
     let context = format!("{mem_context}{hw_context}");
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
     let enriched = if context.is_empty() {
-        format!("[{now}] {effective_message}")
+        effective_message.clone()
     } else {
-        format!("{context}[{now}] {effective_message}")
+        format!("{context}{effective_message}")
     };
 
     let mut history = vec![

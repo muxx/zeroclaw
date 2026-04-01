@@ -8836,6 +8836,10 @@ Let me check the result."#;
             "Native prompt must not contain </tool_call>"
         );
         assert!(
+            !system_prompt.contains("## Tools"),
+            "Native prompt must not duplicate tool listing"
+        );
+        assert!(
             !system_prompt.contains("<tool_result>"),
             "Native prompt must not contain <tool_result>"
         );
@@ -8848,11 +8852,7 @@ Let me check the result."#;
             "Native prompt must not contain XML protocol header"
         );
 
-        // Positive: native prompt should still list tools and contain task instructions
-        assert!(
-            system_prompt.contains("shell"),
-            "Native prompt must list tool names"
-        );
+        // Positive: native prompt should still contain task instructions
         assert!(
             system_prompt.contains("## Your Task"),
             "Native prompt should contain task instructions"

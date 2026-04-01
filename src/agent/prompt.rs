@@ -6,7 +6,6 @@ use crate::security::AutonomyLevel;
 use crate::skills::Skill;
 use crate::tools::Tool;
 use anyhow::Result;
-use chrono::{Datelike, Local, Timelike};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -46,7 +45,6 @@ impl SystemPromptBuilder {
     pub fn with_defaults() -> Self {
         Self {
             sections: vec![
-                Box::new(DateTimeSection),
                 Box::new(IdentitySection),
                 Box::new(ToolHonestySection),
                 Box::new(ToolsSection),
@@ -85,7 +83,6 @@ pub struct SafetySection;
 pub struct SkillsSection;
 pub struct WorkspaceSection;
 pub struct RuntimeSection;
-pub struct DateTimeSection;
 pub struct ChannelMediaSection;
 
 impl PromptSection for IdentitySection {
@@ -253,30 +250,6 @@ impl PromptSection for RuntimeSection {
             "## Runtime\n\nHost: {host} | OS: {} | Model: {}",
             std::env::consts::OS,
             ctx.model_name
-        ))
-    }
-}
-
-impl PromptSection for DateTimeSection {
-    fn name(&self) -> &str {
-        "datetime"
-    }
-
-    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
-        let now = Local::now();
-        // Force Gregorian year to avoid confusion with local calendars (e.g. Buddhist calendar).
-        let (year, month, day) = (now.year(), now.month(), now.day());
-        let (hour, minute, second) = (now.hour(), now.minute(), now.second());
-        let tz = now.format("%Z");
-
-        Ok(format!(
-            "## CRITICAL CONTEXT: CURRENT DATE & TIME\n\n\
-             The following is the ABSOLUTE TRUTH regarding the current date and time. \
-             Use this for all relative time calculations (e.g. \"last 7 days\").\n\n\
-             Date: {year:04}-{month:02}-{day:02}\n\
-             Time: {hour:02}:{minute:02}:{second:02} ({tz})\n\
-             ISO 8601: {year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{}",
-            now.format("%:z")
         ))
     }
 }
@@ -482,31 +455,6 @@ mod tests {
         // Registered tools (shell kind) appear under <callable_tools> with prefixed names.
         assert!(output.contains("<callable_tools"));
         assert!(output.contains("<name>deploy.release_checklist</name>"));
-    }
-
-    #[test]
-    fn datetime_section_includes_timestamp_and_timezone() {
-        let tools: Vec<Box<dyn Tool>> = vec![];
-        let ctx = PromptContext {
-            workspace_dir: Path::new("/tmp"),
-            model_name: "test-model",
-            tools: &tools,
-            skills: &[],
-            skills_prompt_mode: crate::config::SkillsPromptInjectionMode::Full,
-            identity_config: None,
-            dispatcher_instructions: "instr",
-            tool_descriptions: None,
-            security_summary: None,
-            autonomy_level: AutonomyLevel::Supervised,
-        };
-
-        let rendered = DateTimeSection.build(&ctx).unwrap();
-        assert!(rendered.starts_with("## CRITICAL CONTEXT: CURRENT DATE & TIME\n\n"));
-
-        let payload = rendered.trim_start_matches("## CRITICAL CONTEXT: CURRENT DATE & TIME\n\n");
-        assert!(payload.chars().any(|c| c.is_ascii_digit()));
-        assert!(payload.contains("Date:"));
-        assert!(payload.contains("Time:"));
     }
 
     #[test]

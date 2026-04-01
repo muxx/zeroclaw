@@ -12,7 +12,6 @@ use crate::runtime;
 use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool, ToolSpec};
 use anyhow::Result;
-use chrono::{Datelike, Timelike};
 use std::collections::HashMap;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
@@ -713,17 +712,10 @@ impl Agent {
                 .await;
         }
 
-        let now = chrono::Local::now();
-        let (year, month, day) = (now.year(), now.month(), now.day());
-        let (hour, minute, second) = (now.hour(), now.minute(), now.second());
-        let tz = now.format("%Z");
-        let date_str =
-            format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} {tz}");
-
         let enriched = if context.is_empty() {
-            format!("[CURRENT DATE & TIME: {date_str}]\n\n{user_message}")
+            user_message.to_string()
         } else {
-            format!("[CURRENT DATE & TIME: {date_str}]\n\n{context}\n\n{user_message}")
+            format!("{context}\n\n{user_message}")
         };
 
         self.history
@@ -893,11 +885,10 @@ impl Agent {
                 .await;
         }
 
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
         let enriched = if context.is_empty() {
-            format!("[{now}] {user_message}")
+            user_message.to_string()
         } else {
-            format!("{context}[{now}] {user_message}")
+            format!("{context}\n\n{user_message}")
         };
 
         self.history

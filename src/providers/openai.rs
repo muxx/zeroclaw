@@ -1,6 +1,7 @@
+use crate::multimodal;
 use crate::providers::traits::{
     ChatMessage, ChatRequest as ProviderChatRequest, ChatResponse as ProviderChatResponse,
-    Provider, TokenUsage, ToolCall as ProviderToolCall,
+    Provider, ProviderCapabilities, TokenUsage, ToolCall as ProviderToolCall,
 };
 use crate::tools::ToolSpec;
 use async_trait::async_trait;
@@ -73,7 +74,7 @@ struct NativeChatRequest {
 struct NativeMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<MessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +83,25 @@ struct NativeMessage {
     /// that require it in assistant tool-call history messages.
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_content: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Parts(Vec<MessagePart>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum MessagePart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlPart },
+}
+
+#[derive(Debug, Serialize)]
+struct ImageUrlPart {
+    url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -246,6 +266,33 @@ impl OpenAiProvider {
         })
     }
 
+    fn to_message_content(role: &str, content: &str) -> MessageContent {
+        if role != "user" {
+            return MessageContent::Text(content.to_string());
+        }
+
+        let (cleaned_text, image_refs) = multimodal::parse_image_markers(content);
+        if image_refs.is_empty() {
+            return MessageContent::Text(content.to_string());
+        }
+
+        let mut parts = Vec::with_capacity(image_refs.len() + 1);
+        let trimmed_text = cleaned_text.trim();
+        if !trimmed_text.is_empty() {
+            parts.push(MessagePart::Text {
+                text: trimmed_text.to_string(),
+            });
+        }
+
+        for image_ref in image_refs {
+            parts.push(MessagePart::ImageUrl {
+                image_url: ImageUrlPart { url: image_ref },
+            });
+        }
+
+        MessageContent::Parts(parts)
+    }
+
     fn convert_messages(messages: &[ChatMessage]) -> Vec<NativeMessage> {
         messages
             .iter()
@@ -272,7 +319,7 @@ impl OpenAiProvider {
                                 let content = value
                                     .get("content")
                                     .and_then(serde_json::Value::as_str)
-                                    .map(ToString::to_string);
+                                    .map(|content| MessageContent::Text(content.to_string()));
                                 let reasoning_content = value
                                     .get("reasoning_content")
                                     .and_then(serde_json::Value::as_str)
@@ -298,7 +345,7 @@ impl OpenAiProvider {
                         let content = value
                             .get("content")
                             .and_then(serde_json::Value::as_str)
-                            .map(ToString::to_string);
+                            .map(|content| MessageContent::Text(content.to_string()));
                         return NativeMessage {
                             role: "tool".to_string(),
                             content,
@@ -311,7 +358,7 @@ impl OpenAiProvider {
 
                 NativeMessage {
                     role: m.role.clone(),
-                    content: Some(m.content.clone()),
+                    content: Some(Self::to_message_content(&m.role, &m.content)),
                     tool_call_id: None,
                     tool_calls: None,
                     reasoning_content: None,
@@ -349,6 +396,14 @@ impl OpenAiProvider {
 
 #[async_trait]
 impl Provider for OpenAiProvider {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            native_tool_calling: true,
+            vision: true,
+            prompt_caching: false,
+        }
+    }
+
     async fn chat_with_system(
         &self,
         system_prompt: Option<&str>,
@@ -871,7 +926,7 @@ mod tests {
     fn native_message_omits_reasoning_content_when_none() {
         let msg = NativeMessage {
             role: "assistant".to_string(),
-            content: Some("hi".to_string()),
+            content: Some(MessageContent::Text("hi".to_string())),
             tool_call_id: None,
             tool_calls: None,
             reasoning_content: None,
@@ -884,7 +939,7 @@ mod tests {
     fn native_message_includes_reasoning_content_when_some() {
         let msg = NativeMessage {
             role: "assistant".to_string(),
-            content: Some("hi".to_string()),
+            content: Some(MessageContent::Text("hi".to_string())),
             tool_call_id: None,
             tool_calls: None,
             reasoning_content: Some("thinking...".to_string()),
@@ -892,6 +947,32 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("reasoning_content"));
         assert!(json.contains("thinking..."));
+    }
+
+    #[test]
+    fn capabilities_include_vision() {
+        let provider = OpenAiProvider::new(Some("test-key"));
+        let caps = provider.capabilities();
+        assert!(caps.native_tool_calling);
+        assert!(caps.vision);
+    }
+
+    #[test]
+    fn convert_messages_promotes_user_image_markers_to_parts() {
+        use crate::providers::ChatMessage;
+
+        let messages = vec![ChatMessage::user(
+            "Look at this [IMAGE:data:image/png;base64,abc123]",
+        )];
+        let native = OpenAiProvider::convert_messages(&messages);
+        let json = serde_json::to_value(&native[0]).unwrap();
+        let parts = json["content"]
+            .as_array()
+            .expect("content should be an array");
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "Look at this");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,abc123");
     }
 
     // ═══════════════════════════════════════════════════════════════════════

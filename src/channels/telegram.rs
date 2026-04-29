@@ -1,5 +1,6 @@
 use super::traits::{Channel, ChannelMessage, SendMessage};
 use crate::config::{Config, StreamMode};
+use crate::runtime::docker::DOCKER_WORKSPACE_MOUNT_PATH;
 use crate::security::pairing::PairingGuard;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -1895,35 +1896,89 @@ Allowlist Telegram username (without '@') or numeric user ID.",
             return Ok(());
         }
 
-        // Remap Docker container workspace path (/workspace/...) to the host
-        // workspace directory so files written by the containerised runtime
-        // can be found and sent by the host-side Telegram sender.
-        let remapped;
-        let target = if let Some(rel) = target.strip_prefix("/workspace/") {
-            if let Some(ws) = &self.workspace_dir {
-                remapped = ws.join(rel);
-                remapped.to_str().unwrap_or(target)
-            } else {
-                target
-            }
-        } else {
-            target
-        };
-
-        let path = Path::new(target);
+        let path = self.resolve_local_attachment_path(target);
         if !path.exists() {
-            anyhow::bail!("Telegram attachment path not found: {target}");
+            anyhow::bail!("Telegram attachment path not found: {}", path.display());
         }
 
         match attachment.kind {
-            TelegramAttachmentKind::Image => self.send_photo(chat_id, thread_id, path, None).await,
-            TelegramAttachmentKind::Document => {
-                self.send_document(chat_id, thread_id, path, None).await
+            TelegramAttachmentKind::Image => {
+                self.send_photo(chat_id, thread_id, path.as_path(), None)
+                    .await
             }
-            TelegramAttachmentKind::Video => self.send_video(chat_id, thread_id, path, None).await,
-            TelegramAttachmentKind::Audio => self.send_audio(chat_id, thread_id, path, None).await,
-            TelegramAttachmentKind::Voice => self.send_voice(chat_id, thread_id, path, None).await,
+            TelegramAttachmentKind::Document => {
+                self.send_document(chat_id, thread_id, path.as_path(), None)
+                    .await
+            }
+            TelegramAttachmentKind::Video => {
+                self.send_video(chat_id, thread_id, path.as_path(), None)
+                    .await
+            }
+            TelegramAttachmentKind::Audio => {
+                self.send_audio(chat_id, thread_id, path.as_path(), None)
+                    .await
+            }
+            TelegramAttachmentKind::Voice => {
+                self.send_voice(chat_id, thread_id, path.as_path(), None)
+                    .await
+            }
         }
+    }
+
+    fn resolve_local_attachment_path(&self, target: &str) -> std::path::PathBuf {
+        if let Some(rel) = target
+            .strip_prefix(DOCKER_WORKSPACE_MOUNT_PATH)
+            .and_then(|rel| rel.strip_prefix('/'))
+        {
+            if let Some(ws) = &self.workspace_dir {
+                return ws.join(rel);
+            }
+        }
+
+        let path = Path::new(target);
+        if path.is_absolute() {
+            return path.to_path_buf();
+        }
+
+        if let Some(ws) = &self.workspace_dir {
+            let workspace_path = ws.join(path);
+            if workspace_path.exists() || !path.exists() {
+                return workspace_path;
+            }
+        }
+
+        path.to_path_buf()
+    }
+
+    async fn send_attachments_with_fallback(
+        &self,
+        chat_id: &str,
+        thread_id: Option<&str>,
+        attachments: &[TelegramAttachment],
+    ) -> anyhow::Result<()> {
+        let mut failures = Vec::new();
+
+        for attachment in attachments {
+            if let Err(error) = self.send_attachment(chat_id, thread_id, attachment).await {
+                tracing::warn!(
+                    kind = ?attachment.kind,
+                    target = %attachment.target,
+                    error = %error,
+                    "Telegram attachment send failed"
+                );
+                failures.push(format!(
+                    "- {:?}: {} ({error})",
+                    attachment.kind, attachment.target
+                ));
+            }
+        }
+
+        if failures.is_empty() {
+            return Ok(());
+        }
+
+        let fallback = format!("Could not send attachment(s):\n{}", failures.join("\n"));
+        self.send_text_chunks(&fallback, chat_id, thread_id).await
     }
 
     /// Send a document/file to a Telegram chat
@@ -2505,11 +2560,8 @@ impl Channel for TelegramChannel {
                     .await?;
             }
 
-            // Send attachments
-            for attachment in &attachments {
-                self.send_attachment(&chat_id, thread_id.as_deref(), attachment)
-                    .await?;
-            }
+            self.send_attachments_with_fallback(&chat_id, thread_id.as_deref(), &attachments)
+                .await?;
 
             return Ok(());
         }
@@ -2747,9 +2799,8 @@ impl Channel for TelegramChannel {
                     .await?;
             }
 
-            for attachment in &attachments {
-                self.send_attachment(chat_id, thread_id, attachment).await?;
-            }
+            self.send_attachments_with_fallback(chat_id, thread_id, &attachments)
+                .await?;
 
             return Ok(());
         }
@@ -3339,6 +3390,39 @@ mod tests {
     }
 
     #[test]
+    fn resolve_local_attachment_path_uses_workspace_for_relative_targets() {
+        let workspace = tempfile::tempdir().unwrap();
+        let ch = TelegramChannel::new("fake-token".into(), vec!["*".into()], false)
+            .with_workspace_dir(workspace.path().to_path_buf());
+
+        let resolved =
+            ch.resolve_local_attachment_path("output/transcribe/zoom_2025-02-14/summary.md");
+
+        assert_eq!(
+            resolved,
+            workspace
+                .path()
+                .join("output/transcribe/zoom_2025-02-14/summary.md")
+        );
+    }
+
+    #[test]
+    fn resolve_local_attachment_path_remaps_container_workspace_prefix() {
+        let workspace = tempfile::tempdir().unwrap();
+        let ch = TelegramChannel::new("fake-token".into(), vec!["*".into()], false)
+            .with_workspace_dir(workspace.path().to_path_buf());
+
+        let container_path =
+            format!("{DOCKER_WORKSPACE_MOUNT_PATH}/output/transcribe/zoom/summary.md");
+        let resolved = ch.resolve_local_attachment_path(&container_path);
+
+        assert_eq!(
+            resolved,
+            workspace.path().join("output/transcribe/zoom/summary.md")
+        );
+    }
+
+    #[test]
     fn infer_attachment_kind_from_target_detects_document_extension() {
         assert_eq!(
             infer_attachment_kind_from_target("https://example.com/files/specs.pdf?download=1"),
@@ -3537,6 +3621,65 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn telegram_send_document_marker_resolves_workspace_relative_path() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let workspace = tempfile::tempdir().unwrap();
+        let rel_path = "output/transcribe/zoom_2025-02-14/summary.md";
+        let full_path = workspace.path().join(rel_path);
+        std::fs::create_dir_all(full_path.parent().unwrap()).unwrap();
+        std::fs::write(&full_path, "# Summary\n").unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake-token/sendDocument"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let ch = TelegramChannel::new("fake-token".into(), vec!["*".into()], false)
+            .with_workspace_dir(workspace.path().to_path_buf())
+            .with_api_base(server.uri());
+
+        ch.send(&SendMessage::new(
+            format!("[DOCUMENT:{rel_path}]"),
+            "123456",
+        ))
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn telegram_send_attachment_failure_falls_back_to_text() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake-token/sendMessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let ch = TelegramChannel::new("fake-token".into(), vec!["*".into()], false)
+            .with_api_base(server.uri());
+
+        ch.send(&SendMessage::new(
+            "[DOCUMENT:output/transcribe/missing.txt]",
+            "123456",
+        ))
+        .await
+        .unwrap();
     }
 
     // ── File path handling tests ────────────────────────────────────

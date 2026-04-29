@@ -3,6 +3,8 @@ use crate::config::DockerRuntimeConfig;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+pub(crate) const DOCKER_WORKSPACE_MOUNT_PATH: &str = "/workspace";
+
 /// Docker runtime with lightweight container isolation.
 #[derive(Debug, Clone)]
 pub struct DockerRuntime {
@@ -67,7 +69,7 @@ impl RuntimeAdapter for DockerRuntime {
 
     fn storage_path(&self) -> PathBuf {
         if self.config.mount_workspace {
-            PathBuf::from("/workspace/.zeroclaw")
+            Path::new(DOCKER_WORKSPACE_MOUNT_PATH).join(".zeroclaw")
         } else {
             PathBuf::from("/tmp/.zeroclaw")
         }
@@ -122,9 +124,13 @@ impl RuntimeAdapter for DockerRuntime {
 
             process
                 .arg("--volume")
-                .arg(format!("{}:/workspace:rw", host_workspace.display()))
+                .arg(format!(
+                    "{}:{}:rw",
+                    host_workspace.display(),
+                    DOCKER_WORKSPACE_MOUNT_PATH
+                ))
                 .arg("--workdir")
-                .arg("/workspace");
+                .arg(DOCKER_WORKSPACE_MOUNT_PATH);
         }
 
         process

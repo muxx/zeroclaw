@@ -15,10 +15,21 @@ ignore = [
     { id = "RUSTSEC-2024-0388", reason = "derivative via extism → wasmtime transitive dep" },
     { id = "RUSTSEC-2025-0057", reason = "fxhash via extism → wasmtime transitive dep" },
     { id = "RUSTSEC-2025-0119", reason = "number_prefix via indicatif — cosmetic dep" },
-    # wasmtime vulns via extism 1.13.0 — no upstream fix yet; plugins feature-gated
+    # wasmtime vulns via extism — no upstream fix yet; plugins feature-gated
     { id = "RUSTSEC-2026-0006", reason = "wasmtime segfault via extism; awaiting extism upgrade" },
     { id = "RUSTSEC-2026-0020", reason = "WASI resource exhaustion via extism; awaiting extism upgrade" },
     { id = "RUSTSEC-2026-0021", reason = "WASI http fields panic via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0085", reason = "wasmtime component model panic via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0086", reason = "wasmtime Winch data leakage via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0087", reason = "wasmtime Cranelift out-of-sandbox load via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0088", reason = "wasmtime pooling allocator data leakage via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0089", reason = "wasmtime Winch host panic via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0091", reason = "wasmtime component string OOB write/crash via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0092", reason = "wasmtime component string panic via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0093", reason = "wasmtime component string OOB read via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0094", reason = "wasmtime Winch table.grow issue via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0095", reason = "wasmtime Winch sandbox escape via extism; awaiting extism upgrade" },
+    { id = "RUSTSEC-2026-0096", reason = "wasmtime aarch64 Cranelift sandbox escape via extism; awaiting extism upgrade" },
 ]
 
 [licenses]
